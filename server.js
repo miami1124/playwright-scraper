@@ -74,6 +74,10 @@ app.post('/104/login', requireApiKey, async (req, res) => {
     });
     const page = await context.newPage();
 
+    // 先逛首頁再進登入頁，模擬真人的瀏覽路徑
+    // （直接空降 signin.104.com.tw 會被彈回首頁，猜測是登入頁會檢查來源）
+    await page.goto('https://www.104.com.tw/', { waitUntil: 'networkidle', timeout: 30000 });
+    await randomDelay();
     await page.goto('https://signin.104.com.tw/', { waitUntil: 'networkidle', timeout: 30000 });
     await randomDelay();
 
