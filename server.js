@@ -224,7 +224,22 @@ app.post('/104/scrape-jobs', requireApiKey, async (req, res) => {
         });
       });
 
-      if (items.length === 0) break; // 沒有更多結果，提早停止
+      if (items.length === 0) {
+        // 抓不到任何項目，把當下畫面存起來方便判斷原因（例如被導去驗證頁）
+        const debugUrl = page.url();
+        const debugTitle = await page.title().catch(() => '');
+        const screenshot = await page.screenshot({ fullPage: false }).catch(() => null);
+        await browser.close();
+        return res.json({
+          success: true,
+          count: allItems.length,
+          items: allItems,
+          debugNote: '這一頁抓不到任何項目',
+          debugUrl,
+          debugTitle,
+          debugScreenshotBase64: screenshot ? screenshot.toString('base64') : null,
+        });
+      }
       allItems.push(...items);
 
       // 翻下一頁前也插入隨機延遲，避免連續翻頁的規律節奏
