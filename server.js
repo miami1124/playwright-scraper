@@ -59,12 +59,46 @@ app.post('/104/login', requireApiKey, async (req, res) => {
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--disable-blink-features=AutomationControlled'], // 降低被偵測為自動化瀏覽器的機率
+    });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      locale: 'zh-TW',
+      viewport: { width: 1280, height: 800 },
+    });
+    // 把 navigator.webdriver 這個常見的機器人偵測旗標蓋掉
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
     const page = await context.newPage();
 
-    await page.goto('https://signin.104.com.tw/');
+    await page.goto('https://signin.104.com.tw/', { waitUntil: 'networkidle', timeout: 30000 });
     await randomDelay();
+
+    // 先確認登入表單真的有出現，抓不到就把當下畫面存起來回傳，
+    // 不要讓它單純 timeout 死掉、看不出卡在哪一頁
+    const identityVisible = await page
+      .waitForSelector('#identity', { timeout: 15000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!identityVisible) {
+      const debugUrl = page.url();
+      const debugTitle = await page.title().catch(() => '');
+      const debugText = await page.textContent('body').catch(() => '');
+      const screenshot = await page.screenshot({ fullPage: false }).catch(() => null);
+      await browser.close();
+      return res.status(502).json({
+        success: false,
+        error: '找不到登入輸入框，畫面可能被導去別的頁面（人機驗證／地區限制等）',
+        debugUrl,
+        debugTitle,
+        debugText: debugText.slice(0, 500),
+        debugScreenshotBase64: screenshot ? screenshot.toString('base64') : null,
+      });
+    }
 
     // 第一步：輸入帳號
     // 注意：頁面上還有一個 name="fakeInput" 的隱藏陷阱欄位（honeypot），
@@ -74,7 +108,23 @@ app.post('/104/login', requireApiKey, async (req, res) => {
     await page.locator('button:has-text("下一步")').click();
 
     // 第二步：等密碼欄位出現後才輸入（兩段式表單，是動態渲染的）
-    await page.waitForSelector('#password', { timeout: 10000 });
+    const passwordVisible = await page
+      .waitForSelector('#password', { timeout: 15000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!passwordVisible) {
+      const debugUrl = page.url();
+      const debugText = await page.textContent('body').catch(() => '');
+      await browser.close();
+      return res.status(502).json({
+        success: false,
+        error: '輸入完帳號後找不到密碼欄位，可能是帳號格式不對或跳出驗證步驟',
+        debugUrl,
+        debugText: debugText.slice(0, 500),
+      });
+    }
+
     await randomDelay();
     await page.fill('#password', password);
     await randomDelay();
