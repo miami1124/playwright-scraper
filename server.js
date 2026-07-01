@@ -182,5 +182,62 @@ app.post('/104/check-session', requireApiKey, async (req, res) => {
   }
 });
 
+// 職缺列表爬取（demo）：body 帶 { keyword, maxPages }
+// 這是企業帳號還沒到手前的替身練習——104 職缺搜尋結果頁公開不用登入，
+// 結構（列表＋翻頁）跟未來要爬的履歷搜尋結果頁類似，先把「翻頁 + 隨機延遲」這套邏輯練起來，
+// 之後企業帳號到手，只要把目標網址和欄位選擇器換掉，架構直接沿用
+app.post('/104/scrape-jobs', requireApiKey, async (req, res) => {
+  const { keyword, maxPages = 2 } = req.body;
+  if (!keyword) {
+    return res.status(400).json({ success: false, error: 'keyword 為必填' });
+  }
+
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      locale: 'zh-TW',
+    });
+    const page = await context.newPage();
+
+    const allItems = [];
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      const url = `https://www.104.com.tw/jobs/search/?keyword=${encodeURIComponent(keyword)}&page=${pageNum}`;
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 });
+
+      // 模擬人工瀏覽的停留時間，再開始抓這一頁
+      await randomDelay(2000, 5000);
+
+      const items = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('.info-container')).map((el) => {
+          const titleEl = el.querySelector('.info-job__text');
+          const companyEl = el.querySelector('.info-company__text');
+          const tagEls = Array.from(el.querySelectorAll('.info-tags__text'));
+          return {
+            title: titleEl ? titleEl.textContent.trim() : null,
+            url: titleEl ? titleEl.href : null,
+            company: companyEl ? companyEl.textContent.trim() : null,
+            companyUrl: companyEl ? companyEl.href : null,
+            tags: tagEls.map((t) => t.textContent.trim()),
+          };
+        });
+      });
+
+      if (items.length === 0) break; // 沒有更多結果，提早停止
+      allItems.push(...items);
+
+      // 翻下一頁前也插入隨機延遲，避免連續翻頁的規律節奏
+      if (pageNum < maxPages) await randomDelay(2000, 5000);
+    }
+
+    await browser.close();
+    res.json({ success: true, count: allItems.length, items: allItems });
+  } catch (err) {
+    if (browser) await browser.close();
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Listening on ${PORT}`));
