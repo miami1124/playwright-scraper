@@ -187,7 +187,7 @@ app.post('/104/check-session', requireApiKey, async (req, res) => {
 // 結構（列表＋翻頁）跟未來要爬的履歷搜尋結果頁類似，先把「翻頁 + 隨機延遲」這套邏輯練起來，
 // 之後企業帳號到手，只要把目標網址和欄位選擇器換掉，架構直接沿用
 app.post('/104/scrape-jobs', requireApiKey, async (req, res) => {
-  const { keyword, maxPages = 2 } = req.body;
+  const { keyword, maxPages = 2, storageState } = req.body;
   if (!keyword) {
     return res.status(400).json({ success: false, error: 'keyword 為必填' });
   }
@@ -195,9 +195,11 @@ app.post('/104/scrape-jobs', requireApiKey, async (req, res) => {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
+    // 帶入真實 session（就算是公開頁面）可以避免被當成「乾淨無痕的可疑流量」而拿到假資料
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       locale: 'zh-TW',
+      ...(storageState ? { storageState } : {}),
     });
     const page = await context.newPage();
 
